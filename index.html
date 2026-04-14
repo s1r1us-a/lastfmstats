@@ -19,7 +19,13 @@
   --mono:'Space Mono',monospace;--sans:'DM Sans',sans-serif;
   --r:10px;--rl:16px;
 }
-*{box-sizing:border-box;margin:0;padding:0;}
+body.light {
+  --bg:#f5f5f5;--bg2:#ffffff;--bg3:#ebebeb;--bg4:#ddd;--bg5:#d0d0d0;
+  --border:rgba(0,0,0,0.08);--border2:rgba(0,0,0,0.14);--border3:rgba(0,0,0,0.22);
+  --text:#111111;--text2:#555;--text3:#aaa;
+  --pink:#d6187a;--pink2:#f03fa0;--pink3:rgba(214,24,122,0.1);--pink4:rgba(214,24,122,0.05);
+}
+*{box-sizing:border-box;margin:0;padding:0;transition:background-color .25s,border-color .25s,color .15s;}
 html{scroll-behavior:smooth;}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6;}
 ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:var(--bg);}::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px;}
@@ -27,6 +33,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 
 /* NAV */
 nav{position:sticky;top:0;z-index:200;background:rgba(9,9,9,0.88);backdrop-filter:blur(14px);border-bottom:1px solid var(–border);padding:12px 0;}
+body.light nav{background:rgba(245,245,245,0.92);}
 .nav-inner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 .nav-logo{font-family:var(–mono);font-size:12px;color:var(–pink);letter-spacing:0.06em;}
 .nav-links{display:flex;gap:2px;flex-wrap:wrap;}
@@ -35,6 +42,8 @@ nav{position:sticky;top:0;z-index:200;background:rgba(9,9,9,0.88);backdrop-filte
 .nav-right{display:flex;gap:8px;align-items:center;}
 .export-btn{font-family:var(–mono);font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(–border2);background:transparent;color:var(–text2);cursor:pointer;transition:all .2s;}
 .export-btn:hover{border-color:var(–pink);color:var(–pink);}
+.theme-btn{font-family:var(–mono);font-size:14px;width:32px;height:32px;border-radius:6px;border:1px solid var(–border2);background:transparent;color:var(–text2);cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;}
+.theme-btn:hover{border-color:var(–pink);color:var(–pink);}
 
 /* HERO */
 .hero{padding:44px 0 36px;border-bottom:1px solid var(–border);position:relative;overflow:hidden;}
@@ -245,6 +254,7 @@ footer{padding:28px 0;text-align:center;}
       <a href="#tags-sec">Tags</a>
     </div>
     <div class="nav-right">
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Light/Dark Mode">🌙</button>
       <button class="export-btn" onclick="exportPNG()">↓ Export PNG</button>
     </div>
   </div>
@@ -508,6 +518,19 @@ let cmpA='1month',cmpB='3month',selectedYear=null;
 let monthlyInst=null,pieInst=null,trendInst=null;
 let monthlyMode='12'; // '12' or 'lifetime'
 let joinYear=null;
+
+// ── THEME ──────────────────────────────────────────────────
+function applyTheme(light){
+  document.body.classList.toggle('light',light);
+  document.getElementById('theme-btn').textContent=light?'☀️':'🌙';
+}
+function toggleTheme(){
+  const isLight=document.body.classList.contains('light');
+  applyTheme(!isLight);
+  localStorage.setItem('lfm_theme',!isLight?'light':'dark');
+}
+// Load saved theme on startup
+(()=>{const t=localStorage.getItem('lfm_theme');if(t==='light')applyTheme(true);})();
 
 // ── CACHE ──────────────────────────────────────────────────
 function loadCache(){try{const d=localStorage.getItem(CACHE_KEY);if(d){const p=JSON.parse(d);const age=(Date.now()-p.ts)/60000;if(age<30){cache=p.data;document.getElementById('cache-info').textContent='Cache: vor '+Math.round(age)+' Min';return;}}}catch(e){}}
