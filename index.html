@@ -312,6 +312,7 @@ footer{padding:28px 0;text-align:center;}
       <a href="#year-sec" onclick="closeNav()">Jahresrückblick</a>
       <a href="#compare-sec" onclick="closeNav()">Vergleich</a>
       <a href="#recent-sec" onclick="closeNav()">Recents</a>
+      <a href="#archive-sec" onclick="closeNav()">Archiv</a>
       <a href="#tags-sec" onclick="closeNav()">Tags</a>
     </div>
     <div class="nav-right">
@@ -542,7 +543,10 @@ footer{padding:28px 0;text-align:center;}
 <div id="archive-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
   <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:28px 32px;max-width:480px;width:calc(100% - 40px);font-family:var(--mono);">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-      <div style="font-size:13px;color:var(--text);font-weight:700;">🗄 Scrobble-Archiv</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="font-size:13px;color:var(--text);font-weight:700;">🗄 Scrobble-Archiv</div>
+        <div id="archive-sync-badge" style="display:none;font-size:10px;color:var(--text3);background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:2px 8px;"></div>
+      </div>
       <button onclick="closeArchiveModal()" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:12px;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)'" onmouseout="this.style.borderColor='var(--border)'">✕</button>
     </div>
     <div id="archive-status" style="font-size:11px;color:var(--text2);margin-bottom:16px;line-height:1.7;">
@@ -565,6 +569,29 @@ footer{padding:28px 0;text-align:center;}
     </div>
   </div>
 </div>
+
+<!-- ARCHIVE OFFLINE VIEW SECTION -->
+<section id="archive-sec" style="display:none;">
+  <div class="wrap">
+    <div class="sec-hdr">
+      <div class="sec-title">Archiv <span id="archive-sec-badge" style="font-size:10px;color:var(--text3);margin-left:6px;"></span></div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="period-tabs" id="archive-period-tabs">
+          <button class="pb active" data-ap="all">Gesamt</button>
+          <button class="pb" data-ap="year">Dieses Jahr</button>
+          <button class="pb" data-ap="month">Dieser Monat</button>
+        </div>
+        <button onclick="exportArchiveCSV()" style="font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)';this.style.color='var(--pink)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">↓ CSV Export</button>
+      </div>
+    </div>
+    <div class="ctabs" id="archive-ctabs">
+      <div class="ctab active" data-at="tracks">Tracks</div>
+      <div class="ctab" data-at="artists">Künstler</div>
+      <div class="ctab" data-at="albums">Alben</div>
+    </div>
+    <div id="archive-list"><div class="ld"><div class="sp"></div> Lade Archiv...</div></div>
+  </div>
+</section>
 
 <div id="db-toast"><div class="toast-dot"></div><span id="db-toast-msg"></span></div>
 
@@ -1583,8 +1610,9 @@ async function getLatestArchivedTs(){
   try{
     const snap=await db.ref('scrobbles').orderByKey().limitToLast(1).get();
     if(!snap.exists()) return null;
-    const keys=Object.keys(snap.val());
-    return parseInt(keys[0]);
+    const key=Object.keys(snap.val())[0];
+    // Key format: <timestamp>_<artistslug>_<trackslug> — extract timestamp part
+    return parseInt(key.split('_')[0]);
   }catch(e){return null;}
 }
 
@@ -1654,6 +1682,11 @@ function updateProgressBar(pct){
   document.getElementById('archive-progress-bar').style.width=pct+'%';
 }
 
+function makeScrobbleKey(ts,artist,track){
+  const slug=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,24)||'x';
+  return `${ts}_${slug(artist)}_${slug(track)}`;
+}
+
 async function writeBatch(tracks){
   if(!tracks.length) return 0;
   const updates={};
@@ -1662,12 +1695,10 @@ async function writeBatch(tracks){
     if(t['@attr']?.nowplaying) return;
     const ts=parseInt(t.date?.uts);
     if(!ts) return;
-    updates[`scrobbles/${ts}`]={
-      artist:t.artist?.['#text']||t.artist?.name||'',
-      track:t.name||'',
-      album:t.album?.['#text']||'',
-      img:t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text']||''
-    };
+    const artist=t.artist?.['#text']||t.artist?.name||'';
+    const track=t.name||'';
+    const key=makeScrobbleKey(ts,artist,track);
+    updates[`scrobbles/${key}`]={artist,track,album:t.album?.['#text']||''};
     count++;
   });
   if(Object.keys(updates).length) await db.ref('/').update(updates);
@@ -1834,6 +1865,196 @@ function abortImport(){
   updateProgressTxt('Wird abgebrochen...');
 }
 
+// ── AUTO DELTA-SYNC ────────────────────────────────────────
+const AUTO_SYNC_INTERVAL=60*60*1000; // 1 Stunde
+
+function updateSyncBadge(msg,color){
+  const b=document.getElementById('archive-sync-badge');
+  if(!b) return;
+  b.style.display='block';
+  b.textContent=msg;
+  b.style.color=color||'var(--text3)';
+}
+
+async function autoBackgroundSync(){
+  try{
+    const snap=await db.ref('scrobble_meta/last_sync').get();
+    const lastSync=snap.exists()?snap.val():null;
+    const hasArchive=await getLatestArchivedTs();
+    if(!hasArchive) return; // kein Archiv vorhanden, nichts zu syncen
+
+    const now=Date.now();
+    if(lastSync&&(now-lastSync)<AUTO_SYNC_INTERVAL){
+      const mins=Math.round((now-lastSync)/60000);
+      updateSyncBadge(`vor ${mins} Min. aktualisiert`);
+      return;
+    }
+
+    updateSyncBadge('🔄 synchronisiert...','var(--pink)');
+    // Stiller Delta-Sync ohne Modal-UI zu überschreiben
+    const latestTs=await getLatestArchivedTs();
+    if(!latestTs) return;
+    const fromTs=latestTs+1;
+    const first=await fetchScrobblePage(fromTs,null,1,1);
+    const totalPages=parseInt(first?.recenttracks?.['@attr']?.totalPages||1);
+    const totalNew=parseInt(first?.recenttracks?.['@attr']?.total||0);
+
+    if(totalNew===0){
+      await db.ref('scrobble_meta/last_sync').set(now);
+      updateSyncBadge('aktuell ✓','#22c55e');
+      return;
+    }
+
+    let saved=0;
+    for(let page=1;page<=totalPages;page++){
+      const d=await fetchScrobblePage(fromTs,null,page,200);
+      const tracks=d?.recenttracks?.track||[];
+      saved+=await writeBatch(tracks);
+      await new Promise(r=>setTimeout(r,IMPORT_DELAY));
+    }
+    const oldCount=await getArchiveCount()||0;
+    await db.ref('scrobble_meta/count').set(oldCount+saved);
+    await db.ref('scrobble_meta/last_sync').set(now);
+    updateSyncBadge(`+${saved} neue Tracks ✓`,'#22c55e');
+    if(saved>0) showToast(`✓ Auto-Sync: +${Number(saved).toLocaleString('de-DE')} neue Tracks`,'ok');
+  }catch(e){
+    updateSyncBadge('Sync fehlgeschlagen','#ef4444');
+  }
+}
+
+// ── RUNDE 3: OFFLINE ARCHIVE VIEW ─────────────────────────
+let _archiveData=null; // cache der geladenen Daten
+let archivePeriod='all',archiveTab='tracks';
+
+async function loadArchiveSection(){
+  const sec=document.getElementById('archive-sec');
+  const listEl=document.getElementById('archive-list');
+  const badgeEl=document.getElementById('archive-sec-badge');
+
+  const count=await getArchiveCount();
+  if(!count){sec.style.display='none';return;}
+
+  sec.style.display='block';
+  badgeEl.textContent=`(${Number(count).toLocaleString('de-DE')} Tracks)`;
+  listEl.innerHTML='<div class="ld"><div class="sp"></div> Lade Archiv-Daten...</div>';
+
+  if(!_archiveData){
+    try{
+      const snap=await db.ref('scrobbles').get();
+      if(!snap.exists()){listEl.innerHTML='<div style="color:var(--text3);">Kein Archiv.</div>';return;}
+      _archiveData=snap.val();
+    }catch(e){
+      listEl.innerHTML='<div class="err">Fehler beim Laden des Archivs.</div>';return;
+    }
+  }
+  renderArchiveList();
+}
+
+function archiveFilteredEntries(){
+  const now=new Date();
+  const entries=Object.entries(_archiveData||{});
+  if(archivePeriod==='all') return entries;
+  return entries.filter(([key])=>{
+    const ts=parseInt(key.split('_')[0])*1000;
+    const d=new Date(ts);
+    if(archivePeriod==='year') return d.getFullYear()===now.getFullYear();
+    if(archivePeriod==='month') return d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth();
+    return true;
+  });
+}
+
+function renderArchiveList(){
+  const listEl=document.getElementById('archive-list');
+  const entries=archiveFilteredEntries();
+  const countMap={};
+
+  entries.forEach(([key,v])=>{
+    let mapKey,display,sub;
+    if(archiveTab==='tracks'){
+      mapKey=v.artist+'||||'+v.track;
+      display=v.track;sub=v.artist;
+    } else if(archiveTab==='artists'){
+      mapKey=v.artist;display=v.artist;sub='';
+    } else {
+      if(!v.album) return;
+      mapKey=v.artist+'||||'+v.album;
+      display=v.album;sub=v.artist;
+    }
+    if(!display) return;
+    if(!countMap[mapKey]) countMap[mapKey]={display,sub,count:0};
+    countMap[mapKey].count++;
+  });
+
+  const sorted=Object.values(countMap).sort((a,b)=>b.count-a.count).slice(0,50);
+  if(!sorted.length){listEl.innerHTML='<div style="color:var(--text3);font-size:13px;padding:12px;">Keine Einträge für diesen Zeitraum.</div>';return;}
+  const max=sorted[0].count;
+  const html=sorted.map((item,i)=>{
+    const pct=Math.round((item.count/max)*100);
+    const rc=i===0?'g':i===1?'s':i===2?'b':'';
+    return `<div class="ri ${i===0?'rank1':i<3?'top3':''}" style="cursor:default;">
+      <span class="rn ${rc}">${i+1}</span>
+      <div class="ri-ph">♪</div>
+      <div class="ri-info"><div class="ri-name">${item.display}</div>${item.sub?`<div class="ri-sub">${item.sub}</div>`:''}</div>
+      <div class="ri-right">
+        <div class="bar-c"><div class="bar-f" style="width:${pct}%"></div></div>
+        <span class="plays">${Number(item.count).toLocaleString('de-DE')} ▶</span>
+      </div>
+    </div>`;
+  }).join('');
+  listEl.innerHTML=`<div class="rlist">${html}</div>`;
+}
+
+// Period + Tab listeners für Archiv-Sektion
+document.getElementById('archive-period-tabs').querySelectorAll('.pb').forEach(b=>b.addEventListener('click',()=>{
+  document.getElementById('archive-period-tabs').querySelectorAll('.pb').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  archivePeriod=b.dataset.ap;
+  renderArchiveList();
+}));
+document.getElementById('archive-ctabs').querySelectorAll('.ctab').forEach(t=>t.addEventListener('click',()=>{
+  document.getElementById('archive-ctabs').querySelectorAll('.ctab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  archiveTab=t.dataset.at;
+  renderArchiveList();
+}));
+
+// ── RUNDE 4: CSV EXPORT ───────────────────────────────────
+async function exportArchiveCSV(){
+  const btn=event.currentTarget;
+  const origText=btn.textContent;
+  btn.textContent='Wird erstellt...';btn.disabled=true;
+  try{
+    let data=_archiveData;
+    if(!data){
+      const snap=await db.ref('scrobbles').get();
+      if(!snap.exists()) throw new Error('Kein Archiv gefunden');
+      data=snap.val();
+      _archiveData=data;
+    }
+    const rows=[['Datum','Uhrzeit','Künstler','Track','Album']];
+    Object.entries(data)
+      .sort(([a],[b])=>parseInt(a)-parseInt(b))
+      .forEach(([key,v])=>{
+        const ts=parseInt(key.split('_')[0])*1000;
+        const d=new Date(ts);
+        const date=d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+        const time=d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+        const esc=s=>'"'+String(s||'').replace(/"/g,'""')+'"';
+        rows.push([date,time,esc(v.artist),esc(v.track),esc(v.album)]);
+      });
+    const csv=rows.map(r=>r.join(',')).join('\n');
+    const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download='scrobbles_export.csv';a.click();
+    URL.revokeObjectURL(url);
+    showToast('✓ CSV exportiert','ok');
+  }catch(e){
+    showToast('Export fehlgeschlagen: '+e.message,'err');
+  }
+  btn.textContent=origText;btn.disabled=false;
+}
+
 // ── INIT ───────────────────────────────────────────────────
 (async()=>{
   loadCache();
@@ -1863,6 +2084,12 @@ function abortImport(){
 
     // Background DB sync – always check if Firebase is up to date
     if(joinYear) loadLifetimeData(joinYear,true).catch(()=>showToast('⚠ Firebase-Sync fehlgeschlagen','err'));
+
+    // Auto Delta-Sync im Hintergrund
+    autoBackgroundSync().catch(()=>{});
+
+    // Archiv-Sektion laden
+    loadArchiveSection().catch(()=>{});
   }catch(e){
     console.error(e);
     document.body.insertAdjacentHTML('afterbegin',`<div class="wrap"><div class="err" style="margin:16px 0;">Fehler: ${e.message}</div></div>`);
