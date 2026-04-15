@@ -350,7 +350,7 @@ footer{padding:28px 0;text-align:center;}
 <!-- OVERVIEW -->
 <section id="overview">
   <div class="wrap">
-    <div class="sec-hdr"><div class="sec-title">Übersicht</div><div style="display:flex;align-items:center;gap:10px;"><div id="cache-info" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></div><button onclick="clearCache()" style="font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)';this.style.color='var(--pink)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">↻ Daten holen</button></div></div>
+    <div class="sec-hdr"><div class="sec-title">Übersicht</div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><div id="cache-info" style="font-family:var(--mono);font-size:10px;color:var(--text3);"></div><button onclick="clearCache()" style="font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)';this.style.color='var(--pink)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">↻ Daten holen</button><button id="archive-btn" onclick="openArchiveModal()" style="font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text3);cursor:pointer;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)';this.style.color='var(--pink)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">🗄 Archiv</button></div></div>
     <div class="metric-grid" id="overview-grid"><div class="ld"><div class="sp"></div></div></div>
   </div>
 </section>
@@ -537,6 +537,34 @@ footer{padding:28px 0;text-align:center;}
     <div class="ft">Daten via <a href="https://www.last.fm/user/s1r1us-a" target="_blank">Last.fm API</a> · Hörzeit ≈ Ø 3,5 Min/Track · Built for s1r1us-a</div>
   </div>
 </footer>
+
+<!-- ARCHIVE MODAL -->
+<div id="archive-modal" style="display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,0.7);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:28px 32px;max-width:480px;width:calc(100% - 40px);font-family:var(--mono);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="font-size:13px;color:var(--text);font-weight:700;">🗄 Scrobble-Archiv</div>
+      <button onclick="closeArchiveModal()" style="background:transparent;border:1px solid var(--border);color:var(--text2);border-radius:6px;padding:4px 10px;cursor:pointer;font-family:var(--mono);font-size:12px;transition:all .2s;" onmouseover="this.style.borderColor='var(--pink)'" onmouseout="this.style.borderColor='var(--border)'">✕</button>
+    </div>
+    <div id="archive-status" style="font-size:11px;color:var(--text2);margin-bottom:16px;line-height:1.7;">
+      Lädt Archiv-Info...
+    </div>
+    <div id="archive-progress-wrap" style="display:none;margin-bottom:16px;">
+      <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-bottom:8px;">
+        <div id="archive-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--pink),var(--pink2));border-radius:2px;transition:width .3s;"></div>
+      </div>
+      <div id="archive-progress-txt" style="font-size:10px;color:var(--text3);">0%</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button id="archive-import-btn" onclick="startFullImport()" style="font-family:var(--mono);font-size:11px;padding:7px 14px;border-radius:7px;border:1px solid rgba(214,24,122,.4);background:var(--pink3);color:var(--pink2);cursor:pointer;transition:all .2s;">⬇ Vollständiger Import</button>
+      <button id="archive-delta-btn" onclick="startDeltaSync()" style="font-family:var(--mono);font-size:11px;padding:7px 14px;border-radius:7px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .2s;">↻ Delta-Sync</button>
+      <button id="archive-abort-btn" onclick="abortImport()" style="display:none;font-family:var(--mono);font-size:11px;padding:7px 14px;border-radius:7px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.08);color:#ef4444;cursor:pointer;transition:all .2s;">✕ Abbrechen</button>
+    </div>
+    <div style="margin-top:14px;font-size:10px;color:var(--text3);line-height:1.6;">
+      <b style="color:var(--text2);">Vollständiger Import</b> — holt alle Scrobbles einmalig von Last.fm und speichert sie in Firebase.<br>
+      <b style="color:var(--text2);">Delta-Sync</b> — holt nur neue Tracks seit dem letzten gespeicherten Eintrag.
+    </div>
+  </div>
+</div>
 
 <div id="db-toast"><div class="toast-dot"></div><span id="db-toast-msg"></span></div>
 
@@ -1533,6 +1561,208 @@ document.getElementById('cmp-b-tabs').querySelectorAll('.pb').forEach(b=>b.addEv
   document.getElementById('cmp-b-tabs').querySelectorAll('.pb').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');cmpB=b.dataset.p;loadCompare();
 }));
+
+// ── SCROBBLE ARCHIVE ───────────────────────────────────────
+let _importAborted=false;
+
+function openArchiveModal(){
+  document.getElementById('archive-modal').style.display='flex';
+  loadArchiveStatus();
+}
+function closeArchiveModal(){
+  document.getElementById('archive-modal').style.display='none';
+}
+document.getElementById('archive-modal').addEventListener('click',function(e){
+  if(e.target===this) closeArchiveModal();
+});
+
+async function getLatestArchivedTs(){
+  try{
+    const snap=await db.ref('scrobbles').orderByKey().limitToLast(1).get();
+    if(!snap.exists()) return null;
+    const keys=Object.keys(snap.val());
+    return parseInt(keys[0]);
+  }catch(e){return null;}
+}
+
+async function getArchiveCount(){
+  try{
+    // Firebase RTDB doesn't have a count API without reading all data,
+    // so we store a separate counter
+    const snap=await db.ref('scrobble_meta/count').get();
+    return snap.exists()?snap.val():null;
+  }catch(e){return null;}
+}
+
+async function loadArchiveStatus(){
+  const statusEl=document.getElementById('archive-status');
+  statusEl.textContent='Prüfe Firebase-Archiv...';
+  const [latestTs, count]=await Promise.all([getLatestArchivedTs(), getArchiveCount()]);
+  if(!latestTs){
+    statusEl.innerHTML=`<span style="color:var(--text3);">Noch kein Archiv vorhanden.</span><br>Starte den vollständigen Import um alle Scrobbles zu sichern.`;
+  } else {
+    const date=new Date(latestTs*1000).toLocaleString('de-DE',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    const countStr=count!==null?`<br><span style="color:var(--text2);">${Number(count).toLocaleString('de-DE')} Scrobbles</span> gespeichert`:'';
+    statusEl.innerHTML=`Letzter Eintrag: <span style="color:var(--pink);">${date}</span>${countStr}`;
+  }
+}
+
+async function fetchScrobblePage(from,to,page,limit=200){
+  const url=new URL(API);
+  const params={method:'user.getRecentTracks',user:USER,api_key:KEY,format:'json',limit,page,extended:0};
+  if(from) params.from=from;
+  if(to) params.to=to;
+  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
+  const r=await fetch(url);
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+function setArchiveBusy(busy){
+  document.getElementById('archive-import-btn').style.display=busy?'none':'inline-block';
+  document.getElementById('archive-delta-btn').style.display=busy?'none':'inline-block';
+  document.getElementById('archive-abort-btn').style.display=busy?'inline-block':'none';
+  document.getElementById('archive-progress-wrap').style.display=busy?'block':'none';
+}
+
+async function writeBatch(tracks){
+  if(!tracks.length) return;
+  const updates={};
+  tracks.forEach(t=>{
+    if(t['@attr']?.nowplaying) return;
+    const ts=parseInt(t.date?.uts);
+    if(!ts) return;
+    updates[`scrobbles/${ts}`]={
+      artist:t.artist?.['#text']||t.artist?.name||'',
+      track:t.name||'',
+      album:t.album?.['#text']||'',
+      img:t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text']||''
+    };
+  });
+  if(Object.keys(updates).length) await db.ref('/').update(updates);
+}
+
+async function startFullImport(){
+  _importAborted=false;
+  setArchiveBusy(true);
+  const statusEl=document.getElementById('archive-status');
+  const barEl=document.getElementById('archive-progress-bar');
+  const txtEl=document.getElementById('archive-progress-txt');
+
+  try{
+    statusEl.textContent='Ermittle Gesamtanzahl...';
+    const first=await fetchScrobblePage(null,null,1,1);
+    const total=parseInt(first?.recenttracks?.['@attr']?.totalPages||1);
+    const totalTracks=parseInt(first?.recenttracks?.['@attr']?.total||0);
+    statusEl.innerHTML=`Importiere <span style="color:var(--pink);">${Number(totalTracks).toLocaleString('de-DE')}</span> Scrobbles (${total} Seiten)...`;
+
+    let done=0,savedCount=0;
+    // Last.fm gibt Seiten in umgekehrter Reihenfolge zurück (neueste zuerst)
+    // Wir iterieren von Seite 1 bis total
+    for(let page=1;page<=total;page++){
+      if(_importAborted) break;
+      const d=await fetchScrobblePage(null,null,page,200);
+      const tracks=d?.recenttracks?.track||[];
+      await writeBatch(tracks);
+      savedCount+=tracks.filter(t=>!t['@attr']?.nowplaying&&t.date?.uts).length;
+      done++;
+      const pct=Math.round((done/total)*100);
+      barEl.style.width=pct+'%';
+      txtEl.textContent=`${pct}% — Seite ${done}/${total} — ${Number(savedCount).toLocaleString('de-DE')} Tracks gespeichert`;
+      // Small delay to not hammer the API
+      await new Promise(r=>setTimeout(r,250));
+    }
+
+    if(!_importAborted){
+      // Save count meta
+      await db.ref('scrobble_meta/count').set(savedCount);
+      await db.ref('scrobble_meta/last_import').set(Date.now());
+      barEl.style.width='100%';
+      txtEl.textContent='✓ Import abgeschlossen';
+      statusEl.innerHTML=`✓ <span style="color:#22c55e;">${Number(savedCount).toLocaleString('de-DE')} Scrobbles</span> erfolgreich archiviert.`;
+      showToast('✓ Archiv-Import abgeschlossen','ok');
+    } else {
+      statusEl.innerHTML=`Import abgebrochen bei Seite ${done}/${total}.`;
+      showToast('Import abgebrochen','err');
+    }
+  }catch(e){
+    statusEl.innerHTML=`<span style="color:#ef4444;">Fehler: ${e.message}</span>`;
+    showToast('Import fehlgeschlagen','err');
+  }
+  setArchiveBusy(false);
+  loadArchiveStatus();
+}
+
+async function startDeltaSync(){
+  _importAborted=false;
+  setArchiveBusy(true);
+  const statusEl=document.getElementById('archive-status');
+  const barEl=document.getElementById('archive-progress-bar');
+  const txtEl=document.getElementById('archive-progress-txt');
+
+  try{
+    statusEl.textContent='Prüfe letzten archivierten Eintrag...';
+    const latestTs=await getLatestArchivedTs();
+
+    if(!latestTs){
+      statusEl.innerHTML='Kein Archiv gefunden. Bitte zuerst den vollständigen Import durchführen.';
+      setArchiveBusy(false);
+      return;
+    }
+
+    const fromTs=latestTs+1; // +1 um den letzten bekannten Track nicht nochmal zu holen
+    const date=new Date(latestTs*1000).toLocaleString('de-DE',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    statusEl.innerHTML=`Hole neue Tracks seit <span style="color:var(--pink);">${date}</span>...`;
+
+    // Get total new tracks
+    const first=await fetchScrobblePage(fromTs,null,1,1);
+    const totalPages=parseInt(first?.recenttracks?.['@attr']?.totalPages||1);
+    const totalNew=parseInt(first?.recenttracks?.['@attr']?.total||0);
+
+    if(totalNew===0){
+      statusEl.innerHTML=`✓ Archiv ist aktuell. Kein neuer Track seit <span style="color:var(--pink);">${date}</span>.`;
+      setArchiveBusy(false);
+      return;
+    }
+
+    statusEl.innerHTML=`<span style="color:var(--pink);">${Number(totalNew).toLocaleString('de-DE')}</span> neue Tracks gefunden...`;
+    let savedCount=0;
+
+    for(let page=1;page<=totalPages;page++){
+      if(_importAborted) break;
+      const d=await fetchScrobblePage(fromTs,null,page,200);
+      const tracks=d?.recenttracks?.track||[];
+      await writeBatch(tracks);
+      savedCount+=tracks.filter(t=>!t['@attr']?.nowplaying&&t.date?.uts).length;
+      const pct=Math.round((page/totalPages)*100);
+      barEl.style.width=pct+'%';
+      txtEl.textContent=`${pct}% — ${Number(savedCount).toLocaleString('de-DE')} neue Tracks gespeichert`;
+      await new Promise(r=>setTimeout(r,200));
+    }
+
+    if(!_importAborted){
+      // Update count
+      const oldCount=await getArchiveCount()||0;
+      await db.ref('scrobble_meta/count').set(oldCount+savedCount);
+      await db.ref('scrobble_meta/last_sync').set(Date.now());
+      barEl.style.width='100%';
+      txtEl.textContent='✓ Delta-Sync abgeschlossen';
+      statusEl.innerHTML=`✓ <span style="color:#22c55e;">${Number(savedCount).toLocaleString('de-DE')}</span> neue Tracks archiviert.`;
+      showToast('✓ Delta-Sync abgeschlossen','ok');
+    } else {
+      statusEl.innerHTML='Sync abgebrochen.';
+    }
+  }catch(e){
+    statusEl.innerHTML=`<span style="color:#ef4444;">Fehler: ${e.message}</span>`;
+    showToast('Delta-Sync fehlgeschlagen','err');
+  }
+  setArchiveBusy(false);
+  loadArchiveStatus();
+}
+
+function abortImport(){
+  _importAborted=true;
+}
 
 // ── INIT ───────────────────────────────────────────────────
 (async()=>{
