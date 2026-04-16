@@ -1062,22 +1062,20 @@ body > div.wrap:first-of-type{background:transparent;border:none;box-shadow:none
         <div id="pie-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;"></div>
       </div>
     </div>
-    <div class="g2" style="margin-bottom:16px;">
-      <div class="chart-glass">
-        <div class="chart-glass-hdr">
-          <span class="chart-glass-title">Wochentag-Verteilung</span>
-        </div>
-        <div id="wd-chart" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;"><div class="ld"><div class="sp"></div></div></div>
+    <div class="chart-glass" style="margin-bottom:16px;">
+      <div class="chart-glass-hdr">
+        <span class="chart-glass-title">Wochentag-Verteilung</span>
+        <span class="chart-glass-sub" id="wd-sub">letzte 30 Tage</span>
       </div>
-      <div class="chart-glass chart-glass--clock" style="min-height:220px;">
-        <div class="chart-glass-hdr">
-          <span class="chart-glass-title">Tageszeit-Radial</span>
-          <span class="chart-glass-sub">letzte 200 Scrobbles</span>
-        </div>
-        <div style="display:flex;justify-content:center;align-items:center;flex:1;padding:8px 0;">
-          <canvas id="clockChart" role="img" aria-label="Aktivität nach Tageszeit"></canvas>
-        </div>
+      <div id="wd-chart" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;"><div class="ld"><div class="sp"></div></div></div>
+    </div>
+    <div class="chart-glass" style="margin-bottom:16px;position:relative;">
+      <div class="chart-glass-hdr">
+        <span class="chart-glass-title">Tageszeit-Verteilung</span>
+        <span class="chart-glass-sub" id="clock-sub">letzte 30 Tage</span>
       </div>
+      <div id="hour-chart" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;"><div class="ld"><div class="sp"></div></div></div>
+      <div id="hour-tooltip" style="position:absolute;pointer-events:none;background:rgba(26,0,48,0.92);color:#fff;font-family:var(--mono);font-size:11px;padding:6px 10px;border-radius:6px;opacity:0;transform:translate(-50%,-100%);transition:opacity .12s;white-space:nowrap;z-index:5;box-shadow:0 4px 12px rgba(214,24,122,0.25);"></div>
     </div>
     <div class="chart-glass" style="margin-bottom:0;">
       <div class="chart-glass-hdr">
@@ -1160,7 +1158,7 @@ body > div.wrap:first-of-type{background:transparent;border:none;box-shadow:none
 
 <footer>
   <div class="wrap">
-    <div class="ft">Daten via <a href="https://www.last.fm/user/s1r1us-a" target="_blank">Last.fm API</a> · Hörzeit ≈ Ø 3,5 Min/Track · Built for s1r1us-a</div>
+    <div class="ft">Daten via <a href="https://www.last.fm/user/s1r1us-a" target="_blank">Last.fm API</a> · Hörzeit ≈ Ø 2,5 Min/Track · Built for s1r1us-a</div>
   </div>
 </footer>
 
@@ -1326,7 +1324,11 @@ function fmtTime(mins,verbose=false){
   if(d<365) return d.toLocaleString('de-DE')+' Tage'+(verbose?' ('+h.toLocaleString('de-DE')+' Std)':'');
   return (d/365).toFixed(1)+' Jahre'+(verbose?' ('+h.toLocaleString('de-DE')+' Std)':'');
 }
-function fmtHours(mins){ return fmtTime(mins,true); }
+function fmtHours(mins){
+  if(mins<60) return Math.round(mins)+' Min';
+  const h=Math.floor(mins/60);
+  return h.toLocaleString('de-DE')+' Std';
+}
 function timeAgo(ts){
   const s=Math.floor((Date.now()-ts*1000)/1000);
   if(s<60) return 'gerade';
@@ -1461,7 +1463,7 @@ async function loadNowPlayingCard(){
 
 // ── OVERVIEW ───────────────────────────────────────────────
 function renderOverview({total,days,u}){
-  const estMins=total*3.5;
+  const estMins=total*2.5;
   const safedays=days>0?days:1;
   const g=document.getElementById('overview-grid');
   g.innerHTML=`
@@ -1976,91 +1978,194 @@ async function loadPie(){
   }).join('');
 }
 
+// ── ACTIVITY DATA (Weekday + Clock) ────────────────────────
+// Lädt Aktivitäts-Daten für Wochentag und Tageszeit-Chart.
+// Primär aus Firebase-Archiv (letzte 30 Tage) für repräsentative Verteilung,
+// Fallback auf recent tracks falls Archiv nicht verfügbar.
+async function loadActivityData(fallbackTracks){
+  const now=Date.now();
+  const days=30;
+  const fromTs=Math.floor((now-days*86400*1000)/1000);
+  const counts=new Array(7).fill(0); // Mo..So
+  const hours=new Array(24).fill(0);
+  let total=0;
+
+  try{
+    const snap=await db.ref('scrobbles').orderByKey()
+      .startAt(String(fromTs))
+      .get();
+    if(snap.exists()){
+      snap.forEach(child=>{
+        const ts=parseInt(child.key.split('_')[0]);
+        if(!ts||ts<fromTs) return;
+        const d=new Date(ts*1000);
+        const idx=(d.getDay()+6)%7; // Mo=0..So=6
+        counts[idx]++;
+        hours[d.getHours()]++;
+        total++;
+      });
+      if(total>0){
+        return {
+          counts, hours, total,
+          label:`Letzte ${days} Tage · ${fmt(total)} gesamt`
+        };
+      }
+    }
+  }catch(e){console.warn('Activity Firebase fallback:',e);}
+
+  // Fallback: aus den übergebenen recent tracks aggregieren
+  const tracks=fallbackTracks||[];
+  tracks.forEach(t=>{
+    if(t['@attr']?.nowplaying) return;
+    const ts=parseInt(t.date?.uts);
+    if(!ts) return;
+    const d=new Date(ts*1000);
+    counts[(d.getDay()+6)%7]++;
+    hours[d.getHours()]++;
+    total++;
+  });
+  return {
+    counts, hours, total,
+    label:`Letzte ${tracks.length} Scrobbles · ${fmt(total)} gesamt`
+  };
+}
+
 // ── WEEKDAY ────────────────────────────────────────────────
-function renderWeekday(tracks){
-  const days=['So','Mo','Di','Mi','Do','Fr','Sa'],counts=new Array(7).fill(0);
-  tracks.forEach(t=>{if(t['@attr']?.nowplaying)return;const ts=parseInt(t.date?.uts);if(ts)counts[new Date(ts*1000).getDay()]++;});
+// Accepts either an array of Last.fm tracks OR a pre-aggregated activity object
+// {counts:[7], total, label} where counts is Mo-So order.
+function renderWeekday(data){
+  const days=['Mo','Di','Mi','Do','Fr','Sa','So'];
+  let counts, total, subLabel;
+  if(Array.isArray(data)){
+    // Legacy path: array of tracks
+    counts=new Array(7).fill(0);
+    data.forEach(t=>{if(t['@attr']?.nowplaying)return;const ts=parseInt(t.date?.uts);if(ts){
+      // getDay(): 0=So, 1=Mo, ..., 6=Sa → transform to Mo=0, ..., So=6
+      const idx=(new Date(ts*1000).getDay()+6)%7;
+      counts[idx]++;
+    }});
+    total=counts.reduce((s,v)=>s+v,0);
+    subLabel=`letzte ${data.length} Scrobbles`;
+  } else {
+    counts=data.counts;
+    total=data.total;
+    const m=(data.label||'').match(/Letzte\s+[^·]+/i);
+    subLabel=m?m[0].trim().toLowerCase():'Aktivität';
+  }
+  const subEl=document.getElementById('wd-sub');
+  if(subEl) subEl.textContent=subLabel;
   const max=Math.max(...counts)||1;
-  const total=counts.reduce((s,v)=>s+v,0);
   const topDay=days[counts.indexOf(max)];
   document.getElementById('wd-chart').innerHTML=`
-    <div class="wd-bars" style="height:110px;align-items:flex-end;padding-bottom:0;">${counts.map((c,i)=>{
+    <div class="wd-bars" style="height:140px;align-items:flex-end;padding-bottom:0;gap:10px;">${counts.map((c,i)=>{
       const pct=total>0?Math.round((c/total)*100):0;
       const isMx=c===max&&c>0;
-      const barH=c>0?Math.max(6,Math.round((c/max)*80)):3;
-      return `<div class="wd-bw" style="gap:3px;">
+      const barH=c>0?Math.max(8,Math.round((c/max)*110)):3;
+      return `<div class="wd-bw" style="gap:4px;">
         <div class="wd-c" style="opacity:${c>0?1:0.3};color:${isMx?'var(--pink2)':'var(--text2)'};">${c>0?pct+'%':'—'}</div>
-        <div class="wd-b ${isMx?'mx':''}" style="height:${barH}px;opacity:${c===0?0.18:isMx?1:0.55};${isMx?'box-shadow:0 0 10px rgba(214,24,122,0.5);':''}border-radius:3px 3px 0 0;" title="${days[i]}: ${c} Plays${c>0?' ('+pct+'%)':''}"></div>
+        <div class="wd-b ${isMx?'mx':''}" style="height:${barH}px;opacity:${c===0?0.18:isMx?1:0.55};${isMx?'box-shadow:0 0 10px rgba(214,24,122,0.5);':''}border-radius:3px 3px 0 0;" title="${days[i]}: ${fmt(c)} Plays${c>0?' ('+pct+'%)':''}"></div>
         <div class="wd-l" style="opacity:${c===0?0.35:1};color:${isMx?'var(--pink2)':'var(--text3)'};">${days[i]}</div>
       </div>`;
     }).join('')}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:10px;">
-      <span>Letzte 200 Scrobbles · ${total} gesamt</span>
-      ${max>0?`<span style="color:var(--pink2);">Peak: ${topDay} (${max})</span>`:''}
+    <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:12px;">
+      <span>${fmt(total)} Plays gesamt</span>
+      ${max>0?`<span style="color:var(--pink2);">Peak: ${topDay} · ${fmt(max)} Plays</span>`:''}
     </div>
   `;
 }
 
-// ── RADIAL CLOCK ───────────────────────────────────────────
-function renderClock(tracks){
-  const hours=new Array(24).fill(0);
-  tracks.forEach(t=>{if(t['@attr']?.nowplaying)return;const ts=parseInt(t.date?.uts);if(ts)hours[new Date(ts*1000).getHours()]++;});
+// ── HOUR BARS (Tageszeit-Verteilung) ──────────────────────
+// Accepts either an array of Last.fm tracks OR a pre-aggregated activity object
+// {hours:[24], total}
+function renderClock(data){
+  let hours, subLabel;
+  if(Array.isArray(data)){
+    hours=new Array(24).fill(0);
+    data.forEach(t=>{if(t['@attr']?.nowplaying)return;const ts=parseInt(t.date?.uts);if(ts)hours[new Date(ts*1000).getHours()]++;});
+    subLabel=`letzte ${data.length} Scrobbles`;
+  } else {
+    hours=data.hours;
+    const m=(data.label||'').match(/Letzte\s+[^·]+/i);
+    subLabel=m?m[0].trim().toLowerCase():'Aktivität';
+  }
+  const subEl=document.getElementById('clock-sub');
+  if(subEl) subEl.textContent=subLabel;
+
+  const total=hours.reduce((s,v)=>s+v,0);
   const max=Math.max(...hours)||1;
-  const canvas=document.getElementById('clockChart');
-  // Responsive: fit canvas to its container
-  const container=canvas.parentElement;
-  const size=Math.min(container.clientWidth||240,240);
-  const dpr=window.devicePixelRatio||1;
-  canvas.width=size*dpr;
-  canvas.height=size*dpr;
-  canvas.style.width=size+'px';
-  canvas.style.height=size+'px';
-  const ctx=canvas.getContext('2d');
-  ctx.scale(dpr,dpr);
-  const W=size,H=size,cx=W/2,cy=H/2;
-  const R=cx*0.72,innerR=cx*0.28;
-  const style=getComputedStyle(document.body);
-  const textColor=style.getPropertyValue('--text3').trim()||'#9e9aaa';
-  const text2Color=style.getPropertyValue('--text2').trim()||'#c8c4d4';
-  ctx.clearRect(0,0,W,H);
-  // subtle bg ring
-  ctx.beginPath();ctx.arc(cx,cy,R+18,0,Math.PI*2);
-  ctx.strokeStyle='rgba(232,39,154,0.1)';ctx.lineWidth=1;ctx.stroke();
-  // draw segments
-  hours.forEach((c,i)=>{
-    const startAngle=(i/24)*Math.PI*2-Math.PI/2;
-    const endAngle=((i+1)/24)*Math.PI*2-Math.PI/2;
-    const r=innerR+(c/max)*(R-innerR);
-    const alpha=c>0?0.15+0.85*(c/max):0.06;
-    ctx.beginPath();
-    ctx.moveTo(cx+innerR*Math.cos(startAngle),cy+innerR*Math.sin(startAngle));
-    ctx.arc(cx,cy,r,startAngle,endAngle);
-    ctx.lineTo(cx+innerR*Math.cos(endAngle),cy+innerR*Math.sin(endAngle));
-    ctx.arc(cx,cy,innerR,endAngle,startAngle,true);
-    ctx.closePath();
-    ctx.fillStyle=c>0?`rgba(214,24,122,${alpha.toFixed(2)})`:`rgba(232,39,154,0.06)`;
-    ctx.fill();
+  const peakHour=hours.indexOf(max);
+
+  // Welche Labels sichtbar? Immer 0,3,6,9,12,15,18,21 - das ist lesbar & informativ
+  const labelVisible=new Set([0,3,6,9,12,15,18,21]);
+
+  const bars=hours.map((c,i)=>{
+    const pct=total>0?(c/total)*100:0;
+    const pctDisp=Math.round(pct*10)/10;
+    const isMx=c===max&&c>0;
+    const barH=c>0?Math.max(6,Math.round((c/max)*110)):3;
+    const showPct=isMx||(c>0&&pct>=5); // nur relevante Prozente zeigen
+    const showLabel=labelVisible.has(i);
+    return `<div class="wd-bw" data-hour="${i}" data-count="${c}" data-pct="${pctDisp}" style="gap:4px;cursor:pointer;">
+      <div class="wd-c" style="opacity:${showPct?(isMx?1:0.85):0};color:${isMx?'var(--pink2)':'var(--text2)'};min-height:14px;">${showPct?Math.round(pct)+'%':''}</div>
+      <div class="wd-b ${isMx?'mx':''}" style="height:${barH}px;opacity:${c===0?0.18:isMx?1:0.55};${isMx?'box-shadow:0 0 10px rgba(214,24,122,0.5);':''}border-radius:3px 3px 0 0;transition:opacity .15s;"></div>
+      <div class="wd-l" style="opacity:${showLabel?(isMx?1:0.75):0.35};color:${isMx?'var(--pink2)':'var(--text3)'};">${showLabel?String(i).padStart(2,'0'):'·'}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('hour-chart').innerHTML=`
+    <div class="wd-bars" id="hour-bars" style="height:140px;align-items:flex-end;padding-bottom:0;gap:4px;">${bars}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:12px;">
+      <span>${fmt(total)} Plays gesamt</span>
+      ${max>0?`<span style="color:var(--pink2);">Peak: ${String(peakHour).padStart(2,'0')}:00 · ${fmt(max)} Plays</span>`:''}
+    </div>
+  `;
+
+  attachHourHover();
+}
+
+let _hourHoverAttached=false;
+function attachHourHover(){
+  if(_hourHoverAttached) return;
+  _hourHoverAttached=true;
+  const container=document.getElementById('hour-chart');
+  const tooltip=document.getElementById('hour-tooltip');
+  const glass=container.closest('.chart-glass');
+  if(!container||!tooltip||!glass) return;
+
+  container.addEventListener('mousemove',e=>{
+    const bw=e.target.closest('.wd-bw');
+    if(!bw){tooltip.style.opacity='0';return;}
+    const hour=parseInt(bw.dataset.hour);
+    const count=parseInt(bw.dataset.count);
+    const pct=bw.dataset.pct;
+    tooltip.innerHTML=`<span style="color:#f4c0d1;">${String(hour).padStart(2,'0')}:00 – ${String((hour+1)%24).padStart(2,'0')}:00</span><br>${fmt(count)} Plays · ${pct}%`;
+    const glassRect=glass.getBoundingClientRect();
+    const bwRect=bw.getBoundingClientRect();
+    tooltip.style.left=(bwRect.left-glassRect.left+bwRect.width/2)+'px';
+    tooltip.style.top=(bwRect.top-glassRect.top-8)+'px';
+    tooltip.style.opacity='1';
+    // Hover-Highlight
+    bw.querySelector('.wd-b').style.opacity='1';
   });
-  // inner circle bg
-  ctx.beginPath();ctx.arc(cx,cy,innerR-1,0,Math.PI*2);
-  ctx.fillStyle='rgba(255,255,255,0.72)';ctx.fill();
-  // inner circle subtle border
-  ctx.beginPath();ctx.arc(cx,cy,innerR-1,0,Math.PI*2);
-  ctx.strokeStyle='rgba(232,39,154,0.18)';ctx.lineWidth=1.5;ctx.stroke();
-  // hour labels
-  const fontSize=Math.max(7,Math.round(size*0.055));
-  ctx.fillStyle=textColor;ctx.font=`${fontSize}px Space Mono`;ctx.textAlign='center';ctx.textBaseline='middle';
-  [0,6,12,18].forEach(h=>{
-    const angle=(h/24)*Math.PI*2-Math.PI/2;
-    const lx=cx+(R+fontSize+4)*Math.cos(angle),ly=cy+(R+fontSize+4)*Math.sin(angle);
-    ctx.fillText(String(h).padStart(2,'0')+':00',lx,ly);
+  container.addEventListener('mouseleave',()=>{
+    tooltip.style.opacity='0';
+    // Alle Balken zurücksetzen auf Ursprungs-Opacity (via Re-Render durch inline style)
+    container.querySelectorAll('.wd-bw').forEach(bw=>{
+      const bar=bw.querySelector('.wd-b');
+      const isMx=bar.classList.contains('mx');
+      const count=parseInt(bw.dataset.count);
+      bar.style.opacity=count===0?0.18:isMx?1:0.55;
+    });
   });
-  // center label
-  const totalPlays=hours.reduce((s,v)=>s+v,0);
-  ctx.fillStyle='rgba(26,0,48,0.85)';ctx.font=`bold ${Math.round(size*0.09)}px Space Mono`;ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText(totalPlays,cx,cy-6);
-  ctx.fillStyle='rgba(107,58,125,0.75)';ctx.font=`${Math.round(size*0.055)}px Space Mono`;
-  ctx.fillText('plays',cx,cy+10);
+  container.addEventListener('mouseout',e=>{
+    const bw=e.target.closest('.wd-bw');
+    if(!bw) return;
+    // Beim Verlassen eines Balkens: zurücksetzen
+    const bar=bw.querySelector('.wd-b');
+    const isMx=bar.classList.contains('mx');
+    const count=parseInt(bw.dataset.count);
+    bar.style.opacity=count===0?0.18:isMx?1:0.55;
+  });
 }
 
 // ── TREND CHART ────────────────────────────────────────────
@@ -2113,8 +2218,15 @@ async function loadTrend(){
     ));
     monthResults.forEach((tracks,mi)=>{
       const counts={};
-      tracks.forEach(t=>{if(t['@attr']?.nowplaying)return;const n=t.artist?.['#text']||t.artist?.name;if(n)counts[n]=(counts[n]||0)+1;});
-      top3.forEach((a,ai)=>datasets[ai].data[mi]=counts[a.name]||0);
+      tracks.forEach(t=>{
+        if(t['@attr']?.nowplaying)return;
+        const n=t.artist?.['#text']||t.artist?.name;
+        if(n){
+          const key=n.toLowerCase();
+          counts[key]=(counts[key]||0)+1;
+        }
+      });
+      top3.forEach((a,ai)=>datasets[ai].data[mi]=counts[a.name.toLowerCase()]||0);
     });
   }
 
@@ -2378,7 +2490,7 @@ async function loadYearReview(year){
     <div class="mc hi" style="margin-bottom:20px;display:inline-block;min-width:200px;">
       <div class="mc-label">Gesamt ${year}</div>
       <div class="mc-val pink">${fmt(totalD)}</div>
-      <div class="mc-sub">Scrobbles · ~${fmtTime(totalD*3.5)}</div>
+      <div class="mc-sub">Scrobbles · ~${fmtTime(totalD*2.5)}</div>
     </div>
     <div class="g3">
       <div><div style="font-family:var(--mono);font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Top Künstler</div><div class="rlist">${miniList(artists,'artists')}</div></div>
@@ -3255,8 +3367,10 @@ document.addEventListener('keydown',(e)=>{
 
     const [recent,_monthly]=await Promise.all([loadRecent(),loadMonthly(++monthlyLoadId)]);
     window._lastRecentTracks=recent;
-    renderWeekday(recent);
-    renderClock(recent);
+    loadActivityData(recent).then(act=>{
+      renderWeekday(act);
+      renderClock(act);
+    });
     loadPie();
     loadTrend();
     loadCalendar();
@@ -3662,7 +3776,7 @@ document.addEventListener('keydown',(e)=>{
     if(topDay && topDay[1] >= 20){
       const [y,m,d] = topDay[0].split('-').map(Number);
       const datStr = new Date(y, m, d).toLocaleDateString('de-DE', {day:'numeric', month:'long', year:'numeric'});
-      const hrs = Math.round(topDay[1] * 3.5 / 60 * 10) / 10;
+      const hrs = Math.round(topDay[1] * 2.5 / 60 * 10) / 10;
       facts.push({
         icon: '🏃',
         headline: `Dein Marathon-Tag: <span class="ff-highlight">${datStr}</span> mit <span class="ff-highlight">${topDay[1]}</span> Tracks.`,
