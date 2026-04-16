@@ -2710,25 +2710,26 @@ function updateProgressBar(pct){
   document.getElementById('archive-progress-bar').style.width=pct+'%';
 }
 
-function makeScrobbleKey(ts,artist,track){
-  // Timestamp + gekürzte Slugs + einfacher Hash für Kollisionsvermeidung
+function makeScrobbleKey(ts,artist,track,seq){
+  // Timestamp + gekürzte Slugs + Hash + Sequenznummer → garantiert kollisionsfrei
   const slug=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,20)||'x';
   const hashStr=s=>{let h=0;for(let i=0;i<s.length;i++){h=(Math.imul(31,h)+s.charCodeAt(i))|0;}return Math.abs(h).toString(36);};
   const combined=artist.toLowerCase()+'|'+track.toLowerCase();
-  return `${ts}_${slug(artist)}_${slug(track)}_${hashStr(combined)}`;
+  const seqPart=String(seq||0).padStart(4,'0');
+  return `${ts}_${slug(artist)}_${slug(track)}_${hashStr(combined)}_${seqPart}`;
 }
 
-async function writeBatch(tracks){
+async function writeBatch(tracks,pageOffset=0){
   if(!tracks.length) return 0;
   const updates={};
   let count=0;
-  tracks.forEach(t=>{
+  tracks.forEach((t,idx)=>{
     if(t['@attr']?.nowplaying) return;
     const ts=parseInt(t.date?.uts);
     if(!ts) return;
     const artist=t.artist?.['#text']||t.artist?.name||'';
     const track=t.name||'';
-    const key=makeScrobbleKey(ts,artist,track);
+    const key=makeScrobbleKey(ts,artist,track,pageOffset+idx);
     updates[`scrobbles/${key}`]={artist,track,album:t.album?.['#text']||''};
     count++;
   });
@@ -2772,7 +2773,7 @@ async function startFullImport(){
 
       const d=await fetchScrobblePage(null,null,page,200);
       const tracks=d?.recenttracks?.track||[];
-      const written=await writeBatch(tracks);
+      const written=await writeBatch(tracks,(page-1)*200);
       savedCount+=written;
       done++;
 
@@ -2854,7 +2855,7 @@ async function startDeltaSync(){
 
       const d=await fetchScrobblePage(fromTs,null,page,200);
       const tracks=d?.recenttracks?.track||[];
-      const written=await writeBatch(tracks);
+      const written=await writeBatch(tracks,(page-1)*200);
       savedCount+=written;
 
       const pct=Math.round((page/totalPages)*100);
@@ -2960,7 +2961,7 @@ async function autoBackgroundSync(){
     for(let page=1;page<=totalPages;page++){
       const d=await fetchScrobblePage(fromTs,null,page,200);
       const tracks=d?.recenttracks?.track||[];
-      saved+=await writeBatch(tracks);
+      saved+=await writeBatch(tracks,(page-1)*200);
       const pct=Math.round((page/totalPages)*100);
       syncBanner('syncing', `Scrobbles werden geladen... ${page}/${totalPages}`, pct);
       updateSyncBadge(`${pct}%`,'var(--pink)');
