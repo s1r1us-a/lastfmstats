@@ -691,6 +691,22 @@ const PINK='#d6187a',PINK2='#f03fa0';
 const COLORS=['#d6187a','#f03fa0','#c026d3','#7c3aed','#2563eb','#0891b2','#059669','#d97706'];
 const CACHE_KEY='lfm_cache_s1r1us';
 
+// ── HELPERS ────────────────────────────────────────────────
+function escapeHTML(str){
+  if(!str&&str!==0) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+let _chartColors=null;
+function chartColors(){
+  if(_chartColors) return _chartColors;
+  const s=getComputedStyle(document.body);
+  const tick=s.getPropertyValue('--text3').trim()||'#4a4a4a';
+  const grid='rgba(255,255,255,0.04)';
+  const tooltip={backgroundColor:'#111',borderColor:'#333',borderWidth:1,titleColor:'#f0f0f0',bodyColor:'#888',titleFont:{family:'Space Mono'}};
+  _chartColors={tick,grid,tooltip};
+  return _chartColors;
+}
+
 // ── FIREBASE ───────────────────────────────────────────────
 const FB_CONFIG={
   apiKey:"AIzaSyBqeSKTO1fL5arv15HokhvV-y5CBHVB4gk",
@@ -750,21 +766,15 @@ async function lfm(method,params={}){
 
 // ── FORMAT ─────────────────────────────────────────────────
 const fmt=n=>Number(n).toLocaleString('de-DE');
-function fmtTime(mins){
+function fmtTime(mins,verbose=false){
   if(mins<60) return Math.round(mins)+' Min';
   const h=Math.floor(mins/60);
-  if(h<24) return h.toLocaleString('de-DE')+' Std';
-  const d=Math.floor(h/24);
-  if(d<365) return d.toLocaleString('de-DE')+' Tage';
-  return (d/365).toFixed(1)+' Jahre';
-}
-function fmtHours(mins){
-  const h=Math.floor(mins/60);
   const d=Math.floor(h/24);
   if(h<24) return h.toLocaleString('de-DE')+' Std';
-  if(d<365) return d.toLocaleString('de-DE')+' Tage ('+h.toLocaleString('de-DE')+' Std)';
-  return (d/365).toFixed(1)+' Jahre ('+h.toLocaleString('de-DE')+' Std)';
+  if(d<365) return d.toLocaleString('de-DE')+' Tage'+(verbose?' ('+h.toLocaleString('de-DE')+' Std)':'');
+  return (d/365).toFixed(1)+' Jahre'+(verbose?' ('+h.toLocaleString('de-DE')+' Std)':'');
 }
+function fmtHours(mins){ return fmtTime(mins,true); }
 function timeAgo(ts){
   const s=Math.floor((Date.now()-ts*1000)/1000);
   if(s<60) return 'gerade';
@@ -775,13 +785,7 @@ function timeAgo(ts){
 }
 function rankCls(i){return i===0?'g':i===1?'s':i===2?'b':'';}
 function imgEl(src,cls='ri-img'){return src?`<img src="${src}" class="${cls}" alt="" onerror="this.style.display='none'">`:`<div class="${cls.replace('img','ph')}">♪</div>`;}
-function chartColors(){
-  const s=getComputedStyle(document.body);
-  const tick=s.getPropertyValue('--text3').trim()||'#4a4a4a';
-  const grid='rgba(255,255,255,0.04)';
-  const tooltip={backgroundColor:'#111',borderColor:'#333',borderWidth:1,titleColor:'#f0f0f0',bodyColor:'#888',titleFont:{family:'Space Mono'}};
-  return{tick,grid,tooltip};
-}
+
 let _toastTimer=null;
 function showToast(msg,type='',duration=4000){
   const el=document.getElementById('db-toast');
@@ -794,8 +798,10 @@ function showToast(msg,type='',duration=4000){
 
 // ── COUNTER ANIMATION ──────────────────────────────────────
 function animateCounter(el,target,dur=1200){
-  const start=Date.now(),from=0;
+  const start=Date.now();
   const isFloat=String(target).includes('.');
+  const rawCurrent=parseFloat((el.textContent||'0').replace(/\./g,'').replace(',','.'));
+  const from=isNaN(rawCurrent)?0:rawCurrent;
   const tick=()=>{
     const p=Math.min((Date.now()-start)/dur,1);
     const ease=1-Math.pow(1-p,3);
@@ -821,7 +827,7 @@ async function loadHero(npTrack){
   const days=Math.floor((Date.now()-joined)/86400000);
   const total=parseInt(u.playcount);
   const joinStr=joined.toLocaleDateString('de-DE',{year:'numeric',month:'long',day:'numeric'});
-  const country=u.country&&u.country!=='None'?u.country:null;
+  const country=u.country&&u.country!=='None'?escapeHTML(u.country):null;
   document.getElementById('hero-meta').innerHTML=`
     <div class="hm-item">🎵 <span>${fmt(total)}</span> Scrobbles</div>
     <div class="hm-item">📅 seit <span>${joinStr}</span></div>
@@ -836,7 +842,7 @@ async function loadHero(npTrack){
     const t=npTrack;
     const dotEl=document.getElementById('online-dot');
     if(t?.['@attr']?.nowplaying){
-      document.getElementById('hero-np').innerHTML=`<div class="now-playing-hero"><div class="np-dot"></div><span class="np-text">Jetzt:</span> ${t.name} — ${t.artist?.name||t.artist?.['#text']||''}</div>`;
+      document.getElementById('hero-np').innerHTML=`<div class="now-playing-hero"><div class="np-dot"></div><span class="np-text">Jetzt:</span> ${escapeHTML(t.name)} — ${escapeHTML(t.artist?.name||t.artist?.['#text']||'')}</div>`;
       document.querySelector('.hero-avatar')?.classList.add('is-playing');
       if(dotEl) dotEl.style.display='block';
       if(t.image?.[2]?.['#text']){
@@ -862,9 +868,9 @@ async function loadNowPlayingCard(){
 
     const isLive=!!t['@attr']?.nowplaying;
     const src=t.image?.find(x=>x.size==='extralarge')?.['#text']||t.image?.find(x=>x.size==='large')?.['#text']||t.image?.[2]?.['#text']||'';
-    const track=t.name||'';
-    const artist=t.artist?.name||t.artist?.['#text']||'';
-    const album=t.album?.['#text']||'';
+    const track=escapeHTML(t.name||'');
+    const artist=escapeHTML(t.artist?.name||t.artist?.['#text']||'');
+    const album=escapeHTML(t.album?.['#text']||'');
     const loved=t.loved==='1';
     const timeAgoStr=isLive?'':timeAgo(t.date?.uts);
 
@@ -1148,15 +1154,14 @@ function renderCharts(){
   const html=vis.map((item,i)=>{
     const plays=parseInt(item.playcount)||0;
     const pct=Math.round((plays/max)*100);
-    const name=item.name;
-    const sub=chartTab==='artists'?'':(item.artist?.name||'');
+    const name=escapeHTML(item.name);
+    const sub=chartTab==='artists'?'':escapeHTML(item.artist?.name||'');
     const src=item.image?.find(x=>x.size==='medium')?.['#text']||item.image?.[1]?.['#text'];
     const href=item.url||`https://www.last.fm/user/${USER}`;
     const rc=rankCls(i);
     const rankCls2=i===0?'rank1':i===1?'rank2':i===2?'rank3 top3':i<5?'top3':'';
     if(chartTab==='artists'){
-      const safeN=name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-      return `<div class="ri ${rankCls2} fi" style="cursor:pointer;" onclick="openArtistDrillDown('${safeN}')">
+      return `<div class="ri ${rankCls2} fi" style="cursor:pointer;" data-artist="${name}">
         <span class="rn ${rc}">${i+1}</span>
         ${imgEl(src)}
         <div class="ri-info"><div class="ri-name">${name}</div></div>
@@ -1178,6 +1183,10 @@ function renderCharts(){
   }).join('');
   document.getElementById('charts-list').innerHTML=`<div class="rlist">${html||'<div style="color:var(--text3);font-size:13px;padding:12px;">Keine Ergebnisse.</div>'}</div>`;
   document.getElementById('show-more-btn').style.display=items.length>showCount?'block':'none';
+  // Event delegation for artist drill-down (replaces inline onclick with data attribute)
+  document.getElementById('charts-list').querySelectorAll('[data-artist]').forEach(el=>{
+    el.addEventListener('click',()=>openArtistDrillDown(el.dataset.artist));
+  });
   // Animate bars from 0 to target
   requestAnimationFrame(()=>{
     document.querySelectorAll('#charts-list .bar-f[data-pct]').forEach(el=>{
@@ -1525,7 +1534,7 @@ async function loadTrend(){
   });
   const leg=document.createElement('div');
   leg.style.cssText='display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;';
-  leg.innerHTML=top3.map((a,i)=>`<span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:${COLORS[i]};"><span style="width:20px;height:2px;background:${COLORS[i]};display:inline-block;"></span>${a.name}</span>`).join('');
+  leg.innerHTML=top3.map((a,i)=>`<span style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:${COLORS[i]};"><span style="width:20px;height:2px;background:${COLORS[i]};display:inline-block;"></span>${escapeHTML(a.name)}</span>`).join('');
   document.getElementById('trendChart').parentElement.after(leg);
 }
 
@@ -1761,11 +1770,11 @@ async function loadYearReview(year){
     if(!items.length) return '<div style="color:var(--text3);font-size:12px;">Keine Daten</div>';
     return items.map((item,i)=>{
       const src=item.image?.find(x=>x.size==='medium')?.['#text']||item.image?.[1]?.['#text'];
-      const sub=tab==='tracks'?item.artist?.name:'';
+      const sub=tab==='tracks'?escapeHTML(item.artist?.name||''):'';
       return `<div class="ri" style="padding:7px 10px;">
         <span class="rn ${rankCls(i)}">${i+1}</span>
         ${imgEl(src)}
-        <div class="ri-info"><div class="ri-name">${item.name}</div>${sub?`<div class="ri-sub">${sub}</div>`:''}</div>
+        <div class="ri-info"><div class="ri-name">${escapeHTML(item.name)}</div>${sub?`<div class="ri-sub">${sub}</div>`:''}</div>
         <span class="plays">${fmt(parseInt(item.playcount||0))}</span>
       </div>`;
     }).join('');
@@ -1802,9 +1811,9 @@ async function loadCompare(){
     return `<div class="cmp-side">
       <div class="cmp-title">${label}</div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">Top Künstler</div>
-      <div class="rlist" style="margin-bottom:14px;">${side.artists.slice(0,5).map((a,i)=>`<div class="ri" style="padding:6px 10px;"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(a.image?.find(x=>x.size==='medium')?.['#text']||a.image?.[1]?.['#text'])}<div class="ri-info"><div class="ri-name">${a.name}</div></div><span class="plays">${fmt(parseInt(a.playcount||0))}</span></div>`).join('')}</div>
+      <div class="rlist" style="margin-bottom:14px;">${side.artists.slice(0,5).map((a,i)=>`<div class="ri" style="padding:6px 10px;"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(a.image?.find(x=>x.size==='medium')?.['#text']||a.image?.[1]?.['#text'])}<div class="ri-info"><div class="ri-name">${escapeHTML(a.name)}</div></div><span class="plays">${fmt(parseInt(a.playcount||0))}</span></div>`).join('')}</div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">Top Tracks</div>
-      <div class="rlist">${side.tracks.slice(0,5).map((t,i)=>`<div class="ri" style="padding:6px 10px;"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text'])}<div class="ri-info"><div class="ri-name">${t.name}</div><div class="ri-sub">${t.artist?.name||''}</div></div><span class="plays">${fmt(parseInt(t.playcount||0))}</span></div>`).join('')}</div>
+      <div class="rlist">${side.tracks.slice(0,5).map((t,i)=>`<div class="ri" style="padding:6px 10px;"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text'])}<div class="ri-info"><div class="ri-name">${escapeHTML(t.name)}</div><div class="ri-sub">${escapeHTML(t.artist?.name||'')}</div></div><span class="plays">${fmt(parseInt(t.playcount||0))}</span></div>`).join('')}</div>
     </div>`;
   }
   document.getElementById('compare-content').innerHTML=`${dupWarning}<div class="cmp-grid">${renderSide(sideA,periodLabel[cmpA])}${renderSide(sideB,periodLabel[cmpB])}</div>`;
@@ -1812,18 +1821,21 @@ async function loadCompare(){
 
 // ── RECENT ─────────────────────────────────────────────────
 async function loadRecent(){
-  const d=await lfm('user.getRecentTracks',{limit:30,extended:1});
+  const RECENT_LIMIT=200;
+  const d=await lfm('user.getRecentTracks',{limit:RECENT_LIMIT,extended:1});
   const tracks=d?.recenttracks?.track||[];
   const total=d?.recenttracks?.['@attr']?.total;
   if(total) document.getElementById('recent-total').textContent=fmt(total)+' gesamt';
-  const html=tracks.map(t=>{
+  // Nur die ersten 30 in der UI anzeigen, alle 200 für Wochentag/Uhrzeit-Analyse nutzen
+  const displayTracks=tracks.slice(0,30);
+  const html=displayTracks.map(t=>{
     const isNow=t['@attr']?.nowplaying;
     const src=t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text'];
     const imgE=src?`<img src="${src}" class="rec-img" alt="">`:`<div class="rec-img" style="display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:12px;">♪</div>`;
     const timeE=isNow?`<span class="np-badge">live</span>`:`<span class="rec-time">${timeAgo(t.date?.uts)}</span>`;
     const loved=t.loved==='1'?`<span style="color:var(--pink);font-size:11px;margin-left:3px;">♥</span>`:'';
     const href=t.url||`https://www.last.fm/music/${encodeURIComponent(t.artist?.name||t.artist?.['#text']||'')}/_/${encodeURIComponent(t.name||'')}`;
-    return `<a class="rec-item" href="${href}" target="_blank" rel="noopener">${imgE}<div class="rec-info"><div class="rec-name">${t.name}${loved}</div><div class="rec-art">${t.artist?.name||t.artist?.['#text']||''}${t.album?.['#text']?' · '+t.album['#text']:''}</div></div>${timeE}</a>`;
+    return `<a class="rec-item" href="${href}" target="_blank" rel="noopener">${imgE}<div class="rec-info"><div class="rec-name">${escapeHTML(t.name)}${loved}</div><div class="rec-art">${escapeHTML(t.artist?.name||t.artist?.['#text']||'')}${t.album?.['#text']?' · '+escapeHTML(t.album['#text']):''}</div></div>${timeE}</a>`;
   }).join('');
   document.getElementById('recent-list').innerHTML=`<div class="rec-list">${html}</div>`;
   return tracks;
@@ -1839,7 +1851,7 @@ async function loadLoved(){
   const html=tracks.map((t,i)=>{
     const src=t.image?.find(x=>x.size==='medium')?.['#text']||t.image?.[1]?.['#text'];
     const href=t.url||'#';
-    return `<a class="ri" href="${href}" target="_blank" rel="noopener"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(src)}<div class="ri-info"><div class="ri-name">${t.name}</div><div class="ri-sub">${t.artist?.name||''}</div></div><span style="color:var(--pink);">♥</span></a>`;
+    return `<a class="ri" href="${href}" target="_blank" rel="noopener"><span class="rn ${rankCls(i)}">${i+1}</span>${imgEl(src)}<div class="ri-info"><div class="ri-name">${escapeHTML(t.name)}</div><div class="ri-sub">${escapeHTML(t.artist?.name||'')}</div></div><span style="color:var(--pink);">♥</span></a>`;
   }).join('');
   document.getElementById('loved-list').innerHTML=`<div class="rlist">${html}</div>`;
 }
@@ -1849,7 +1861,7 @@ async function loadTags(){
   const d=await lfm('user.getTopTags',{limit:40});
   const tags=d?.toptags?.tag||[];
   if(!tags.length){document.getElementById('tags-content').innerHTML='<div style="color:var(--text3);">Keine Tags.</div>';return;}
-  document.getElementById('tags-content').innerHTML=`<div class="tags-wrap">${tags.map((t,i)=>`<span class="tag ${i<6?'lg':''}" title="${fmt(t.count)} Gewichtung">${t.name}</span>`).join('')}</div>`;
+  document.getElementById('tags-content').innerHTML=`<div class="tags-wrap">${tags.map((t,i)=>`<span class="tag ${i<6?'lg':''}" title="${fmt(t.count)} Gewichtung">${escapeHTML(t.name)}</span>`).join('')}</div>`;
 }
 
 // ── EXPORT PNG ─────────────────────────────────────────────
@@ -2448,13 +2460,13 @@ function renderArchiveList(){
     let mapKey,display,sub;
     if(archiveTab==='tracks'){
       mapKey=v.artist+'||||'+v.track;
-      display=v.track;sub=v.artist;
+      display=escapeHTML(v.track);sub=escapeHTML(v.artist);
     } else if(archiveTab==='artists'){
-      mapKey=v.artist;display=v.artist;sub='';
+      mapKey=v.artist;display=escapeHTML(v.artist);sub='';
     } else {
       if(!v.album) return;
       mapKey=v.artist+'||||'+v.album;
-      display=v.album;sub=v.artist;
+      display=escapeHTML(v.album);sub=escapeHTML(v.artist);
     }
     if(!display) return;
     if(!countMap[mapKey]) countMap[mapKey]={display,sub,count:0};
@@ -2606,7 +2618,7 @@ async function openArtistDrillDown(artistName){
     return `<div class="ri ${rankCls2}" style="cursor:default;">
       <span class="rn ${rc}">${i+1}</span>
       <div class="ri-ph">♪</div>
-      <div class="ri-info"><div class="ri-name">${track}</div></div>
+      <div class="ri-info"><div class="ri-name">${escapeHTML(track)}</div></div>
       <div class="ri-right">
         <div class="bar-c"><div class="bar-f" style="width:${pct}%"></div></div>
         <span class="plays">${Number(count).toLocaleString('de-DE')} ▶</span>
@@ -2628,7 +2640,7 @@ document.addEventListener('keydown',(e)=>{
   const adm=document.getElementById('adm-overlay');
   if(adm?.classList.contains('open')){closeArtistDrillDown(null);return;}
   const archiveMod=document.getElementById('archive-modal');
-  if(archiveMod?.style.opacity==='1'||archiveMod?.classList.contains('open')){closeArchiveModal();return;}
+  if(archiveMod?.classList.contains('open')){closeArchiveModal();return;}
 });
 
 // ── INIT ───────────────────────────────────────────────────
@@ -2647,7 +2659,7 @@ document.addEventListener('keydown',(e)=>{
     loadYearReview(new Date().getFullYear());
     loadStreak();
 
-    const [recent,_monthly]=await Promise.all([loadRecent(),loadMonthly()]);
+    const [recent,_monthly]=await Promise.all([loadRecent(),loadMonthly(++monthlyLoadId)]);
     window._lastRecentTracks=recent;
     renderWeekday(recent);
     renderClock(recent);
