@@ -1158,7 +1158,7 @@ body > div.wrap:first-of-type{background:transparent;border:none;box-shadow:none
 
 <footer>
   <div class="wrap">
-    <div class="ft">Daten via <a href="https://www.last.fm/user/s1r1us-a" target="_blank">Last.fm API</a> · Hörzeit ≈ Ø 3,0 Min/Track · Built for s1r1us-a</div>
+    <div class="ft">Daten via <a href="https://www.last.fm/user/s1r1us-a" target="_blank">Last.fm API</a> · Hörzeit ≈ Ø 2,5 Min/Track · Built for s1r1us-a</div>
   </div>
 </footer>
 
@@ -1472,6 +1472,7 @@ function renderOverview({total,days,u}){
     <div class="mc"><div class="mc-label">Ø pro Tag</div><div class="mc-val counter" id="cnt-day">0</div><div class="mc-sub">Tracks täglich</div></div>
     <div class="mc"><div class="mc-label">Ø pro Woche</div><div class="mc-val counter" id="cnt-week">0</div></div>
     <div class="mc"><div class="mc-label">Ø pro Monat</div><div class="mc-val counter" id="cnt-month">0</div></div>
+    <div class="mc"><div class="mc-label">Heute gehört</div><div class="mc-val" id="mc-today-time">—</div><div class="mc-sub" id="mc-today-sub">wird geladen…</div></div>
     <div class="mc"><div class="mc-label">Aktive Tage</div><div class="mc-val counter" id="cnt-days">0</div><div class="mc-sub">seit Registrierung</div></div>
     <div class="mc"><div class="mc-label">Entdeckte Künstler</div><div class="mc-val counter" id="cnt-artists">0</div></div>
     <div class="mc"><div class="mc-label">Entdeckte Tracks</div><div class="mc-val counter" id="cnt-tracks">0</div></div>
@@ -1488,6 +1489,23 @@ function renderOverview({total,days,u}){
     animateCounter(document.getElementById('cnt-tracks'),parseInt(u.track_count||0));
     animateCounter(document.getElementById('cnt-albums'),parseInt(u.album_count||0));
   },100);
+}
+
+// ── HEUTE GEHÖRT ───────────────────────────────────────────
+function updateTodayTime(){
+  const el=document.getElementById('mc-today-time');
+  const sub=document.getElementById('mc-today-sub');
+  if(!el||!_archiveData) return;
+  const now=new Date();
+  const midnightTs=Math.floor(new Date(now.getFullYear(),now.getMonth(),now.getDate())/1000);
+  let count=0;
+  Object.keys(_archiveData).forEach(key=>{
+    const ts=parseInt(key.split('_')[0]);
+    if(ts>=midnightTs) count++;
+  });
+  const mins=count*3;
+  el.textContent=fmtHours(mins);
+  if(sub) sub.textContent=`${fmt(count)} Scrobbles heute`;
 }
 
 // ── DIVERSITY ──────────────────────────────────────────────
@@ -3110,6 +3128,7 @@ async function loadArchiveSection(){
         // Chart-Count-Cache invalidieren damit er die Archiv-Daten nutzt
         _chartCountCache={};
         updateChartsTrackCount();
+        updateTodayTime();
       }
     }
   }catch(e){}
@@ -3135,6 +3154,7 @@ async function toggleArchive(){
       loadStreak();
       _chartCountCache={};
       updateChartsTrackCount();
+      updateTodayTime();
     }catch(e){
       listEl.innerHTML='<div class="err">Fehler beim Laden des Archivs.</div>';return;
     }
@@ -3290,7 +3310,7 @@ async function openArtistDrillDown(artistName){
   if(!_archiveData){
     try{
       const snap=await db.ref('scrobbles').get();
-      if(snap.exists()) _archiveData=snap.val();
+      if(snap.exists()) { _archiveData=snap.val(); updateTodayTime(); }
       else{bodyEl.innerHTML='<div class="err">Kein Archiv gefunden.</div>';return;}
     }catch(e){bodyEl.innerHTML='<div class="err">Fehler: '+e.message+'</div>';return;}
   }
