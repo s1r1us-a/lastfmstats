@@ -1462,7 +1462,7 @@ a[href^="tel"]{color:inherit;text-decoration:none;pointer-events:none;}
 const USER='s1r1us-a',KEY='b126713de975c43a7a8f046bcf954884',API='https://ws.audioscrobbler.com/2.0/';
 const PINK='#d6187a',PINK2='#f03fa0';
 const COLORS=['#d6187a','#f03fa0','#c026d3','#7c3aed','#2563eb','#0891b2','#059669','#d97706'];
-const CACHE_KEY='lfm_cache_s1r1us';
+const CACHE_KEY='lfm_cache_s1r1us_v2';
 
 // ── HELPERS ────────────────────────────────────────────────
 function escapeHTML(str){
@@ -2047,21 +2047,20 @@ function calcChartsFromArchive(period,tab){
 async function loadCharts(){
   const key=chartTab+'_'+chartPeriod;
   let items;
-  if(cache['top_'+key]){items=cache['top_'+key];}
+  // Cache-Hit nur bei NICHT-leerem Array akzeptieren —
+  // ein leeres Array könnte ein altes Race-Condition-Artefakt aus localStorage sein
+  const cached=cache['top_'+key];
+  if(Array.isArray(cached)&&cached.length>0){items=cached;}
   else{
     document.getElementById('charts-list').innerHTML='<div class="ld"><div class="sp"></div> Lade...</div>';
     document.getElementById('show-more-btn').style.display='none';
 
+    // Archiv-Daten AKTIV laden — statt passiv auf _archiveData zu pollen.
+    // getArchiveData() ist idempotent (nutzt internes Promise), also egal wie oft es aufgerufen wird.
+    const archData=await getArchiveData();
+
     if(chartPeriod==='today'){
       // Heute: aus Archiv berechnen + nur nowplaying-Track separat von API holen
-      if(!_archiveData){
-        document.getElementById('charts-list').innerHTML='<div class="ld"><div class="sp"></div> Warte auf Archiv-Daten...</div>';
-        await new Promise(r=>{
-          const check=setInterval(()=>{if(_archiveData){clearInterval(check);r();}},200);
-          setTimeout(()=>{clearInterval(check);r();},8000);
-        });
-      }
-
       const now=new Date();
       const midnightTs=Math.floor(new Date(now.getFullYear(),now.getMonth(),now.getDate())/1000);
 
@@ -2113,20 +2112,11 @@ async function loadCharts(){
 
     } else {
       // Alle anderen Perioden: aus Firebase-Archiv berechnen
-      if(!_archiveData){
-        // Archiv noch nicht geladen – kurz warten und nochmal versuchen
-        document.getElementById('charts-list').innerHTML='<div class="ld"><div class="sp"></div> Warte auf Archiv-Daten...</div>';
-        await new Promise(r=>{
-          const check=setInterval(()=>{if(_archiveData){clearInterval(check);r();}},200);
-          setTimeout(()=>{clearInterval(check);r();},8000); // max 8s warten
-        });
-      }
       items=calcChartsFromArchive(chartPeriod,chartTab)||[];
     }
-    // Cache nur setzen wenn Archiv-Daten wirklich verfügbar sind —
-    // sonst würde ein leeres Ergebnis aus einem Race-Condition-Timeout
-    // permanent eingefroren und der Button zeigt für immer "Keine Ergebnisse".
-    if(_archiveData) cache['top_'+key]=items;
+    // Cache nur setzen wenn Archiv-Daten wirklich verfügbar sind UND Ergebnis nicht leer —
+    // sonst würde ein leeres Ergebnis aus einem Fehler permanent eingefroren.
+    if(archData&&Array.isArray(items)&&items.length>0) cache['top_'+key]=items;
   }
   allItems=items;
   showCount=10;
@@ -3102,7 +3092,10 @@ document.getElementById('chart-periods').querySelectorAll('.pb').forEach(b=>b.ad
   chartPeriod=b.dataset.p;
   // Cache für neue Periode löschen falls _archiveData zwischenzeitlich aktualisiert wurde
   if(prev!==chartPeriod) delete _chartCountCache[chartPeriod];
-  showCount=10;loadCharts();updateChartsTrackCount();
+  showCount=10;
+  // updateChartsTrackCount zuerst — triggert getArchiveData() und zeigt Badge-Count sofort an
+  updateChartsTrackCount();
+  loadCharts();
 }));
 document.querySelectorAll('.ctab').forEach(t=>t.addEventListener('click',()=>{
   document.querySelectorAll('.ctab').forEach(x=>x.classList.remove('active'));
