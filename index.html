@@ -3667,30 +3667,37 @@ async function autoBackgroundSync(silent=false){
 }
 
 // ── HEALTH-CHECK: Firebase vs. Last.fm Drift-Erkennung ────
-// Vergleicht die tatsächliche Key-Anzahl in Firebase mit Last.fms gemeldeter
-// Playcount. Bei Drift > 2 → Warn-Banner + Empfehlung.
-// Wird nach autoBackgroundSync aufgerufen, damit normale Delta-Lücken schon
-// geschlossen sind und echte Daten-Korruption übrig bleibt.
+// Vergleicht die tatsächliche Key-Anzahl in Firebase mit der Anzahl, die
+// Last.fm via `getRecentTracks` als abrufbar meldet.
+// WICHTIG: NICHT gegen `user.getInfo.playcount` vergleichen — der Counter
+// enthält strukturell immer mehr (Now-Playing, gelöschte/bearbeitete Scrobbles,
+// interne Counter-Lags zwischen den Endpoints). Er driftet permanent von dem
+// ab, was via `getRecentTracks` überhaupt holbar ist. Da Delta-Sync aus
+// `getRecentTracks` liest, muss der Health-Check dieselbe Quelle nutzen —
+// sonst zeigt er Drift an, die durch keinen Sync jemals geschlossen werden
+// kann ("Archiv ist X hinter Last.fm" trotz leerem Delta-Sync).
 async function checkArchiveHealth(){
   if(isLfmDown()) return; // Ohne Last.fm kein Vergleich möglich
   try{
-    const [lfmInfo, archiveCount] = await Promise.all([
-      lfmSafe('user.getInfo'),
+    // `from=1` setzen, damit Last.fm wirklich die Gesamtzahl aller je
+    // abrufbaren Scrobbles zurückgibt (ohne from/to kann es im Einzelfall
+    // einen Window-begrenzten Total liefern).
+    const [firstPage, archiveCount] = await Promise.all([
+      fetchScrobblePage(1,null,1,1),
       getRealArchiveCount()
     ]);
-    if(!lfmInfo?.user) return; // Last.fm nicht erreichbar
-    const lfmCount = parseInt(lfmInfo.user.playcount)||0;
+    const lfmCount = parseInt(firstPage?.recenttracks?.['@attr']?.total)||0;
+    if(!lfmCount) return; // Last.fm nicht erreichbar oder leer
     const drift = lfmCount - archiveCount;
     // Counter in Firebase auch gleich auf Realwert syncen (für Archiv-Badge)
     const metaCount = await getArchiveCount();
     if(metaCount !== archiveCount){
       try{ await db.ref('scrobble_meta/count').set(archiveCount); }catch(e){}
     }
-    // Drift-Threshold: Last.fms `user.getInfo.playcount` enthält strukturell
-    // mehr als was via `getRecentTracks` abrufbar ist (Now-Playing, gelöschte
-    // Tracks, fehlerhafte Importe). Eine Drift von ein paar Scrobbles ist
-    // normal und kein Datenverlust. Threshold: max(20, 0.2% des Playcounts).
-    const driftThreshold = Math.max(20, Math.floor(lfmCount * 0.002));
+    // Drift-Threshold: Da wir jetzt gegen `getRecentTracks.total` vergleichen
+    // (dieselbe Quelle wie Delta-Sync) sollte die Drift im Idealfall 0 sein.
+    // Kleine Toleranz für Race-Conditions (Sync läuft parallel zu neuem Scrobble).
+    const driftThreshold = Math.max(5, Math.floor(lfmCount * 0.0005));
     if(drift > driftThreshold && archiveCount > 0){
       const pct = Math.round((archiveCount/lfmCount)*100);
       const driftPct = drift / lfmCount;
@@ -3705,8 +3712,11 @@ async function checkArchiveHealth(){
       );
       console.warn(`Archive health: ${archiveCount}/${lfmCount} (drift ${drift}, threshold ${driftThreshold})`);
     } else if(drift > 0){
-      // Kleine Drift ignorieren — normales Last.fm-API-Rauschen
+      // Kleine Drift ignorieren — normales API-Rauschen / Race-Condition
       console.info(`Archive health: ${archiveCount}/${lfmCount} (drift ${drift} innerhalb Toleranz ${driftThreshold})`);
+    } else if(drift < 0){
+      // Archiv > Last.fm — kann durch gelöschte Scrobbles bei Last.fm passieren
+      console.info(`Archive health: ${archiveCount}/${lfmCount} (archive ahead by ${-drift})`);
     }
   }catch(e){console.warn('checkArchiveHealth failed:',e);}
 }
